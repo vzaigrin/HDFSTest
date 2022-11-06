@@ -3,14 +3,13 @@ package ru.otus.hdfs
 import com.typesafe.config.ConfigFactory
 import org.apache.hadoop.conf._
 import org.apache.hadoop.fs._
+import org.apache.hadoop.hdfs.DistributedFileSystem
 import org.apache.hadoop.io.IOUtils
-import java.net.URI
 
 object HDFSTest {
   def main(args: Array[String]): Unit = {
     // Читаем конфигурационный файл
     val config           = ConfigFactory.load()
-    val uri              = config.getString("uri")
     val from             = config.getString("from")
     val to               = config.getString("to")
     val readySuffix      = config.getString("readySuffix")
@@ -22,10 +21,12 @@ object HDFSTest {
     val hdfsHDFSSitePath = new Path("hdfs-site.xml")
     conf.addResource(hdfsCoreSitePath)
     conf.addResource(hdfsHDFSSitePath)
+    conf.set("fs.hdfs.impl", classOf[DistributedFileSystem].getName)
+    conf.set("fs.file.impl", classOf[LocalFileSystem].getName)
     conf.setBoolean("dfs.support.append", true)
     conf.setBoolean("dfs.client.block.write.replace-datanode-on-failure.enable", false)
 
-    val hdfs = FileSystem.get(new URI(uri), conf)
+    val hdfs: FileSystem = FileSystem.get(conf)
 
     // Если исходный каталог существует
     val fromPath = new Path(from)
@@ -44,7 +45,7 @@ object HDFSTest {
             .filter(_.isFile)
             .map(_.getPath)
 
-          // Подкаталог можно удалять, если есть ли незаконченные файлы
+          // Подкаталог можно удалять, если нет незаконченных файлов
           val isDirComplete = !files.exists(_.getName.endsWith(inProgressSuffix))
 
           // Список файлов для копирования - те, которые оканчиваются на readySuffix
@@ -70,16 +71,16 @@ object HDFSTest {
             val newFile = s"$newSubDir/$fileToAppend"
             val newPath = new Path(newFile)
 
-            // Если в целевом подкаталоге нет файла, в который будем добавлять записи, создаём его
-            if (!hdfs.exists(newPath)) hdfs.create(newPath)
+            // Если в целевом подкаталоге нет файла, в который надо добавлять записи, создаём его
+            if (!hdfs.exists(newPath)) hdfs.createNewFile(newPath)
 
             // Копируем содержимое файлов из исходного подкаталога в целевой подкаталог
             filesToCopy.foreach { fromPath =>
               val inputStream  = hdfs.open(fromPath)
               val outputStream = hdfs.append(newPath)
               IOUtils.copyBytes(inputStream, outputStream, 4096, true)
-              outputStream.close()
               inputStream.close()
+              outputStream.close()
             }
           }
 
